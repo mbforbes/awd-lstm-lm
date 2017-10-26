@@ -1,7 +1,10 @@
+# builtins
 import os
-import torch
-
 from collections import Counter
+
+# 3rd party
+from tqdm import tqdm
+import torch
 
 
 class Dictionary(object):
@@ -25,11 +28,12 @@ class Dictionary(object):
 
 
 class Corpus(object):
-    def __init__(self, path):
+    def __init__(self, path, test):
         self.dictionary = Dictionary()
         self.train = self.tokenize(os.path.join(path, 'train.txt'))
         self.valid = self.tokenize(os.path.join(path, 'valid.txt'))
-        self.test = self.tokenize(os.path.join(path, 'test.txt'))
+        if test:
+            self.test = self.tokenize(os.path.join(path, 'test.txt'))
 
     def tokenize(self, path):
         """Tokenizes a text file."""
@@ -37,7 +41,7 @@ class Corpus(object):
         # Add words to the dictionary
         with open(path, 'r') as f:
             tokens = 0
-            for line in f:
+            for line in tqdm(f):
                 words = line.split() + ['<eos>']
                 tokens += len(words)
                 for word in words:
@@ -47,7 +51,7 @@ class Corpus(object):
         with open(path, 'r') as f:
             ids = torch.LongTensor(tokens)
             token = 0
-            for line in f:
+            for line in tqdm(f):
                 words = line.split() + ['<eos>']
                 for word in words:
                     ids[token] = self.dictionary.word2idx[word]

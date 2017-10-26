@@ -1,4 +1,5 @@
 import argparse
+import code
 import time
 import math
 import numpy as np
@@ -44,6 +45,8 @@ parser.add_argument('--wdrop', type=float, default=0.5,
                     help='amount of weight dropout to apply to the RNN hidden to hidden matrix')
 parser.add_argument('--tied', action='store_false',
                     help='tie the word embedding and softmax weights')
+parser.add_argument('--test', action='store_true',
+                    help='whether to load and run on a test set')
 parser.add_argument('--seed', type=int, default=1111,
                     help='random seed')
 parser.add_argument('--nonmono', type=int, default=5,
@@ -76,21 +79,29 @@ if torch.cuda.is_available():
 # Load data
 ###############################################################################
 
-corpus = data.Corpus(args.data)
+print('Loading corpus from "{}"'.format(args.data))
+corpus = data.Corpus(args.data, args.test)
 
+print('Batchifying data from "{}"'.format(args.data))
 eval_batch_size = 10
 test_batch_size = 1
+print('Batchifying training data')
 train_data = batchify(corpus.train, args.batch_size, args)
+print('Batchifying validation data')
 val_data = batchify(corpus.valid, eval_batch_size, args)
-test_data = batchify(corpus.test, test_batch_size, args)
+if args.test:
+    print('Batchifying test data')
+    test_data = batchify(corpus.test, test_batch_size, args)
 
 ###############################################################################
 # Build the model
 ###############################################################################
 
+print('Building model')
 ntokens = len(corpus.dictionary)
 model = model.RNNModel(args.model, ntokens, args.emsize, args.nhid, args.nlayers, args.dropout, args.dropouth, args.dropouti, args.dropoute, args.wdrop, args.tied)
 if args.cuda:
+    print('Moving model to GPU')
     model.cuda()
 total_params = sum(x.size()[0] * x.size()[1] if len(x.size()) > 1 else x.size()[0] for x in model.parameters())
 print('Args:', args)
@@ -136,6 +147,7 @@ def train():
         lr2 = optimizer.param_groups[0]['lr']
         optimizer.param_groups[0]['lr'] = lr2 * seq_len / args.bptt
         model.train()
+        print('\t Retrieving batch i={}, seq_len={}'.format(i, seq_len))
         data, targets = get_batch(train_data, i, args, seq_len=seq_len)
 
         # Starting each batch, we detach the hidden state from how it was previously produced.
@@ -143,7 +155,9 @@ def train():
         hidden = repackage_hidden(hidden)
         optimizer.zero_grad()
 
+        print('\t ----- Running model.forward(...)')
         output, hidden, rnn_hs, dropped_rnn_hs = model(data, hidden, return_h=True)
+        print('\t ----- Computing loss')
         raw_loss = criterion(output.view(-1, ntokens), targets)
 
         loss = raw_loss
@@ -151,6 +165,12 @@ def train():
         loss = loss + sum(args.alpha * dropped_rnn_h.pow(2).mean() for dropped_rnn_h in dropped_rnn_hs[-1:])
         # Temporal Activation Regularization (slowness)
         loss = loss + sum(args.beta * (rnn_h[1:] - rnn_h[:-1]).pow(2).mean() for rnn_h in rnn_hs[-1:])
+
+        print('\t ----- About to run loss.backward()')
+
+        # TODO(mbforbes): Remove (for debugging).
+        code.interact(local=dict(globals(), **locals()))
+
         loss.backward()
 
         # `clip_grad_norm` helps prevent the exploding gradient problem in RNNs / LSTMs.
@@ -234,8 +254,9 @@ with open(args.save, 'rb') as f:
     model = torch.load(f)
 
 # Run on test data.
-test_loss = evaluate(test_data, test_batch_size)
-print('=' * 89)
-print('| End of training | test loss {:5.2f} | test ppl {:8.2f}'.format(
-    test_loss, math.exp(test_loss)))
-print('=' * 89)
+if args.test:
+    test_loss = evaluate(test_data, test_batch_size)
+    print('=' * 89)
+    print('| End of training | test loss {:5.2f} | test ppl {:8.2f}'.format(
+        test_loss, math.exp(test_loss)))
+    print('=' * 89)
