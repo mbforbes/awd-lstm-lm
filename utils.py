@@ -26,9 +26,10 @@ def batchify(data, bsz, args):
     # Evenly divide the data across the bsz batches.
     data = data.view(bsz, -1).t().contiguous()
 
-    # For BIG DATA, moving to GPU only in get_batch(...).
-    # if args.cuda:
-    #     data = data.cuda()
+    # NOTE(mbforbes): Idea, but not doing right now: For BIG DATA, only move to
+    # GPU in get_batch(...).
+    if args.cuda:
+        data = data.cuda()
     return data
 
 def get_batch(source, i, args, seq_len=None, evaluation=False):
@@ -45,12 +46,12 @@ def get_batch(source, i, args, seq_len=None, evaluation=False):
     data = Variable(source[i:i+seq_len], volatile=evaluation)
     target = Variable(source[i+1:i+1+seq_len].view(-1))
 
-    # TODO(mbforbes): Remove (for debugging).
-    code.interact(local=dict(globals(), **locals()))
+    # NOTE(mbforbes): Idea, but not doing right now: Move to GPU here (instead
+    # of in batchify).
+    # if args.cuda:
+    #     data = data.cuda()
+    #     target = target.cuda()
 
-    if args.cuda:
-        data = data.cuda()
-        target = target.cuda()
     return data, target
 
 

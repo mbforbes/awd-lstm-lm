@@ -147,7 +147,10 @@ def train():
         lr2 = optimizer.param_groups[0]['lr']
         optimizer.param_groups[0]['lr'] = lr2 * seq_len / args.bptt
         model.train()
-        print('\t Retrieving batch i={}, seq_len={}'.format(i, seq_len))
+
+        # NOTE(mbforbes): Debugging.
+        # print('\t Retrieving batch i={}, seq_len={}'.format(i, seq_len))
+
         data, targets = get_batch(train_data, i, args, seq_len=seq_len)
 
         # Starting each batch, we detach the hidden state from how it was previously produced.
@@ -155,9 +158,14 @@ def train():
         hidden = repackage_hidden(hidden)
         optimizer.zero_grad()
 
-        print('\t ----- Running model.forward(...)')
+        # NOTE(mbforbes): Debugging.
+        # print('\t ----- Running model.forward(...)')
+
         output, hidden, rnn_hs, dropped_rnn_hs = model(data, hidden, return_h=True)
-        print('\t ----- Computing loss')
+
+        # NOTE(mbforbes): Debugging.
+        # print('\t ----- Computing loss')
+
         raw_loss = criterion(output.view(-1, ntokens), targets)
 
         loss = raw_loss
@@ -166,10 +174,10 @@ def train():
         # Temporal Activation Regularization (slowness)
         loss = loss + sum(args.beta * (rnn_h[1:] - rnn_h[:-1]).pow(2).mean() for rnn_h in rnn_hs[-1:])
 
-        print('\t ----- About to run loss.backward()')
 
-        # TODO(mbforbes): Remove (for debugging).
-        code.interact(local=dict(globals(), **locals()))
+        # NOTE(mbforbes): Debugging.
+        # print('\t ----- About to run loss.backward()')
+        # code.interact(local=dict(globals(), **locals()))
 
         loss.backward()
 
