@@ -1,5 +1,23 @@
+# imports
+# ---
+
+# builtins
 import code
+from typing import Union
+
+# 3rd party
+import torch
 from torch.autograd import Variable
+
+
+# types
+# ---
+
+LongTensor = Union[torch.LongTensor, torch.cuda.LongTensor]
+
+
+# code
+# ---
 
 def repackage_hidden(h):
     """Wraps hidden states in new Variables, to detach them from their history."""
@@ -8,10 +26,12 @@ def repackage_hidden(h):
     else:
         return tuple(repackage_hidden(v) for v in h)
 
-def batchify(data, bsz, args):
+
+def batchify(data, bsz: int, args) -> LongTensor:
     """
     Args:
         data: 1D LongTensor of size: (n_tokens) (e.g., 5,543,556)
+        bsz: batch size
 
     Returns:
         data: 2D LongTensor of size: (n_tokens/bsz, bsz) (e.g., 69294x80). This
@@ -31,6 +51,7 @@ def batchify(data, bsz, args):
     if args.cuda:
         data = data.cuda()
     return data
+
 
 def get_batch(source, i, args, seq_len=None, evaluation=False):
     """

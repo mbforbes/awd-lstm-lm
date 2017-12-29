@@ -1,16 +1,29 @@
+# imports
+# ---
+
+# builtins
 import argparse
 import code
 import time
 import math
+from typing import Tuple, Optional, Union
+
+# 3rd party
 import numpy as np
 import torch
 import torch.nn as nn
 from torch.autograd import Variable
 
+# local
 import data
 from model import RNNModel
-
 from utils import batchify, get_batch, repackage_hidden
+
+
+# types
+# ---
+
+LongTensor = Union[torch.LongTensor, torch.cuda.LongTensor]
 
 ###############################################################################
 # Prep
@@ -91,9 +104,13 @@ def set_seed(seed: int, use_cuda: bool) -> None:
 # Load data
 ###############################################################################
 
-def load_data(args, eval_batch_size: int, test_batch_size: int):
+def load_data(args, eval_batch_size: int, test_batch_size: int) -> Tuple[int, LongTensor, LongTensor, Optional[LongTensor]]:
     """
-    Returns corpus, train_data, val_data, test_data
+    Returns (vocab size, train_data, val_data, test_data|None).
+
+    Each of *_data returned will be a 2D LongTensor of shape (N x batch size).
+
+    test_data will be None if args.test isn't provided.
     """
     print('Loading corpus from "{}"'.format(args.data))
     corpus = data.Corpus(args.data, args.test)
@@ -112,19 +129,18 @@ def load_data(args, eval_batch_size: int, test_batch_size: int):
         print('Batchifying test data')
         test_data = batchify(corpus.test, test_batch_size, args)
 
-    return corpus, train_data, val_data, test_data
+    return len(corpus.dictionary), train_data, val_data, test_data
 
 
 ###############################################################################
 # Build the model
 ###############################################################################
 
-def build_model(args, corpus):
+def build_model(args, ntokens: int):
     """
     Returns model and loss function.
     """
     print('Building model')
-    ntokens = len(corpus.dictionary)
     model = RNNModel(
         args.model, ntokens, args.emsize, args.nhid, args.nlayers, args.dropout,
         args.dropouth, args.dropouti, args.dropoute, args.wdrop, args.tied)
@@ -144,12 +160,11 @@ def build_model(args, corpus):
 # Training code
 ###############################################################################
 
-def evaluate(args, model, criterion, corpus, data_source, batch_size=10):
+def evaluate(args, model, criterion, ntokens: int, data_source, batch_size=10):
     # Turn on evaluation mode which disables dropout.
     model.eval()
     if args.model == 'QRNN': model.reset()
     total_loss = 0
-    ntokens = len(corpus.dictionary)
     hidden = model.init_hidden(batch_size)
     for i in range(0, data_source.size(0) - 1, args.bptt):
         data, targets = get_batch(data_source, i, args, evaluation=True)
@@ -160,12 +175,11 @@ def evaluate(args, model, criterion, corpus, data_source, batch_size=10):
     return total_loss[0] / len(data_source)
 
 
-def train(args, model, criterion, optimizer, corpus, train_data, epoch):
+def train(args, model, criterion, optimizer, ntokens: int, train_data, epoch):
     # Turn on training mode which enables dropout.
     if args.model == 'QRNN': model.reset()
     total_loss = 0
     start_time = time.time()
-    ntokens = len(corpus.dictionary)
     hidden = model.init_hidden(args.batch_size)
     batch, i = 0, 0
     while i < train_data.size(0) - 1 - 1:
@@ -232,7 +246,9 @@ def train(args, model, criterion, optimizer, corpus, train_data, epoch):
         i += seq_len
 
 
-def train_loop(args, model, criterion, corpus, train_data, val_data, eval_batch_size: int):
+def train_loop(
+        args, model, criterion, ntokens: int, train_data: LongTensor,
+        val_data: LongTensor, eval_batch_size: int):
     # Loop over epochs.
     lr = args.lr
     best_val_loss = []
@@ -243,14 +259,14 @@ def train_loop(args, model, criterion, corpus, train_data, val_data, eval_batch_
         optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, weight_decay=args.wdecay)
         for epoch in range(1, args.epochs+1):
             epoch_start_time = time.time()
-            train(args, model, criterion, optimizer, corpus, train_data, epoch)
+            train(args, model, criterion, optimizer, ntokens, train_data, epoch)
             if 't0' in optimizer.param_groups[0]:
                 tmp = {}
                 for prm in model.parameters():
                     tmp[prm] = prm.data.clone()
                     prm.data = optimizer.state[prm]['ax'].clone()
 
-                val_loss2 = evaluate(args, model, criterion, corpus, val_data)
+                val_loss2 = evaluate(args, model, criterion, ntokens, val_data)
                 print('-' * 89)
                 print('| end of epoch {:3d} | time: {:5.2f}s | valid loss {:5.2f} | '
                         'valid ppl {:8.2f}'.format(epoch, (time.time() - epoch_start_time),
@@ -267,7 +283,7 @@ def train_loop(args, model, criterion, corpus, train_data, val_data, eval_batch_
                     prm.data = tmp[prm].clone()
 
             else:
-                val_loss = evaluate(args, model, criterion, corpus, val_data, eval_batch_size)
+                val_loss = evaluate(args, model, criterion, ntokens, val_data, eval_batch_size)
                 print('-' * 89)
                 print('| end of epoch {:3d} | time: {:5.2f}s | valid loss {:5.2f} | '
                         'valid ppl {:8.2f}'.format(epoch, (time.time() - epoch_start_time),
@@ -292,7 +308,7 @@ def train_loop(args, model, criterion, corpus, train_data, val_data, eval_batch_
         print('Exiting from training early')
 
 
-def test(args, criterion, corpus, test_data, test_batch_size):
+def test(args, criterion, ntokens: int, test_data: Optional[LongTensor], test_batch_size: int):
     if not args.test:
         print('Skipping test because --test not provided...')
         return
@@ -305,7 +321,7 @@ def test(args, criterion, corpus, test_data, test_batch_size):
         model = torch.load(f)
 
     # Run on test data.
-    test_loss = evaluate(args, model, criterion, corpus, test_data, test_batch_size)
+    test_loss = evaluate(args, model, criterion, ntokens, test_data, test_batch_size)
     print('=' * 89)
     print('| End of training | test loss {:5.2f} | test ppl {:8.2f}'.format(
         test_loss, math.exp(test_loss)))
@@ -320,11 +336,13 @@ def main():
     # main
     args = get_args()
     set_seed(args.seed, args.cuda)
-    corpus, train_data, val_data, test_data = load_data(
+
+    ntokens, train_data, val_data, test_data = load_data(
         args, eval_batch_size, test_batch_size)
-    model, criterion = build_model(args, corpus)
-    train_loop(args, model, criterion, corpus, train_data, val_data, eval_batch_size)
-    test(args, criterion, corpus, test_data, test_batch_size)
+
+    model, criterion = build_model(args, ntokens)
+    train_loop(args, model, criterion, ntokens, train_data, val_data, eval_batch_size)
+    test(args, criterion, ntokens, test_data, test_batch_size)
 
 
 if __name__ == '__main__':
