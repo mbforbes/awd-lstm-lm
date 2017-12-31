@@ -4,7 +4,7 @@ import code
 from collections import Counter
 import os
 import pickle
-from typing import Optional, Union
+from typing import Optional, Union, List
 import typing
 
 # 3rd party
@@ -75,13 +75,10 @@ class Corpus(object):
 ## Custom replacements (different APIs)
 ## ---
 
+EOS = '</s>'
+UNK = '<unk>'
 
 class Vocab(object):
-
-    # settings
-    UNK = '<unk>'
-    EOS = '</s>'
-    SPECIAL_TOKENS = [UNK, EOS]
 
     def __init__(self):
         # state
@@ -91,7 +88,8 @@ class Vocab(object):
     @staticmethod
     def build(
             train_path: str, save_path: Optional[str] = None,
-            limit: Optional[int] = None) -> 'Vocab':
+            limit: Optional[int] = None,
+            special_tokens: List[str] = [EOS, '<beg>', '<end>']) -> 'Vocab':
         """
         Factory.
 
@@ -111,20 +109,20 @@ class Vocab(object):
                 words = line.split()
                 # != '<end>' check specific to our datasets
                 if len(words) > 0 and words[-1] != '<end>':
-                    words.append(Vocab.EOS)
+                    words.append(EOS)
                 c.update(words)
 
         # most common `limit` words
         if limit is not None:
-            limit += len(Vocab.SPECIAL_TOKENS)
+            limit += len(special_tokens)
         v = Vocab()
         for i, (token, freq) in enumerate(c.most_common(limit)):
             v.idx2word.append(token)
             v.word2idx[token] = i
 
         # always add unk
-        v.idx2word.append(Vocab.UNK)
-        v.word2idx[Vocab.UNK] = len(v.idx2word) - 1
+        v.idx2word.append(UNK)
+        v.word2idx[UNK] = len(v.idx2word) - 1
 
         print('INFO: Vocab size (incl. special tkns): {}'.format(len(v.idx2word)))
 
@@ -163,7 +161,7 @@ class Vocab(object):
         # tensor in one go.
         print('INFO: Tokenizing "{}"'.format(path))
 
-        unk = self.word2idx[Vocab.UNK]
+        unk = self.word2idx[UNK]
 
         tkns = []
         with open(path, 'r') as f:
@@ -172,7 +170,7 @@ class Vocab(object):
                 words = line.split()
                 # != '<end>' check specific to our datasets
                 if len(words) > 0 and words[-1] != '<end>':
-                    words.append(Vocab.EOS)
+                    words.append(EOS)
 
                 # convert to ints and save to our buffer. UNK if missing.
                 for word in words:
