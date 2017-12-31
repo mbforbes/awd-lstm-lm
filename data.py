@@ -4,7 +4,7 @@ import code
 from collections import Counter
 import os
 import pickle
-from typing import Optional, Union, List
+from typing import Optional, Union, List, Dict
 import typing
 
 # 3rd party
@@ -80,10 +80,13 @@ UNK = '<unk>'
 
 class Vocab(object):
 
-    def __init__(self):
+    def __init__(self) -> None:
         # state
-        self.word2idx = {}
-        self.idx2word = []
+        self.word2idx = {}  # type: Dict[str, int]
+        self.idx2word = []  # type: List[str]
+
+    def __len__(self) -> int:
+        return len(self.idx2word)
 
     @staticmethod
     def build(

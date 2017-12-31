@@ -6,6 +6,7 @@ import argparse
 import code
 import time
 import math
+import sys
 from typing import Tuple, Optional, Union
 
 # 3rd party
@@ -16,6 +17,7 @@ from torch.autograd import Variable
 
 # local
 import data
+from data import Vocab
 from model import RNNModel
 from utils import batchify, get_batch, repackage_hidden
 
@@ -34,6 +36,7 @@ def get_args():
     Just to clean up main().
     """
     parser = argparse.ArgumentParser(description='PyTorch PennTreeBank RNN/LSTM Language Model')
+    # orig args
     parser.add_argument('--data', type=str, default='data/penn/',
                         help='location of the data corpus')
     parser.add_argument('--model', type=str, default='LSTM',
@@ -66,8 +69,6 @@ def get_args():
                         help='amount of weight dropout to apply to the RNN hidden to hidden matrix')
     parser.add_argument('--tied', action='store_false',
                         help='tie the word embedding and softmax weights')
-    parser.add_argument('--test', action='store_true',
-                        help='whether to load and run on a test set')
     parser.add_argument('--seed', type=int, default=1111,
                         help='random seed')
     parser.add_argument('--nonmono', type=int, default=5,
@@ -85,6 +86,25 @@ def get_args():
                         help='beta slowness regularization applied on RNN activiation (beta = 0 means no regularization)')
     parser.add_argument('--wdecay', type=float, default=1.2e-6,
                         help='weight decay applied to all weights')
+    # new args (used with newer load_data(...))
+    parser.add_argument('--test', action='store_true',
+                        help='whether to load and run on a test set')
+    parser.add_argument(
+        'in_vocab_path',
+        type=str,
+        help='path to vocab file (overrides --data)')
+    parser.add_argument(
+        'in_train_path',
+        type=str,
+        help='path to training file (overrides --data)')
+    parser.add_argument(
+        'in_val_path',
+        type=str,
+        help='path to val file (overrides --data)')
+    parser.add_argument(
+        '--in_test_path',
+        type=str,
+        help='path to test file (overrides --data)')
     args = parser.parse_args()
     return args
 
@@ -106,6 +126,34 @@ def set_seed(seed: int, use_cuda: bool) -> None:
 
 def load_data(args, eval_batch_size: int, test_batch_size: int) -> Tuple[int, LongTensor, LongTensor, Optional[LongTensor]]:
     """
+    New data loading function.
+
+    Run data.py (the main func calls Vocab.preprocess(...)) to generate.
+
+    Returns (vocab size, train_data, val_data, test_data|None).
+
+    Each of *_data returned will be a 2D LongTensor of shape (N x batch size).
+
+    test_data will be None if args.test isn't provided.
+    """
+    # load vocab and tensors
+
+    # NOTE: don't really need vocab, just its length, though might be useful
+    # down the road for debugging, and will be needed eventually for
+    # generation.
+    v = data.Vocab.load(args.in_vocab_path)
+    train_data = batchify(torch.load(args.in_train_path), args.batch_size, args)
+    val_data = batchify(torch.load(args.in_val_path), eval_batch_size, args)
+    test_data = None
+    if args.test and args.in_test_path is not None:
+        test_data = batchify(torch.load(args.in_test_path), test_batch_size, args)
+
+    return len(v), train_data, val_data, test_data
+
+def load_data_old(args, eval_batch_size: int, test_batch_size: int) -> Tuple[int, LongTensor, LongTensor, Optional[LongTensor]]:
+    """
+    Original data loading function.
+
     Returns (vocab size, train_data, val_data, test_data|None).
 
     Each of *_data returned will be a 2D LongTensor of shape (N x batch size).
