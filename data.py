@@ -150,7 +150,7 @@ class Vocab(object):
         with open(path, 'wb') as f:
             pickle.dump(self, f)
 
-    def tokenize(self, path: str) -> LongTensor:
+    def tokenize(self, path: str) -> torch.LongTensor:
         """
         Returns 1D tensor (CPU) with path tokenized using self.
         """
