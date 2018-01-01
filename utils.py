@@ -34,10 +34,10 @@ def batchify(data, bsz: int, args) -> LongTensor:
         bsz: batch size
 
     Returns:
-        data: 2D LongTensor of size: (n_tokens/bsz, bsz) (e.g., 69294x80). This
-            is just data reshaped into bsz columns. It is ordered down the 0th
-            column, then down the 1st column, ..., until finally it reaches the
-            bottom of the bsz'th column.
+        data: 2D LongTensor of size: (n_tokens/bsz x bsz) (e.g., 69294 x 80).
+            This is just data reshaped into bsz columns. It is ordered down the
+            0th column, then down the 1st column, ..., until finally it reaches
+            the bottom of the bsz'th column.
     """
     # Work out how cleanly we can divide the dataset into bsz parts.
     nbatch = data.size(0) // bsz
@@ -46,10 +46,10 @@ def batchify(data, bsz: int, args) -> LongTensor:
     # Evenly divide the data across the bsz batches.
     data = data.view(bsz, -1).t().contiguous()
 
-    # NOTE(mbforbes): Idea, but not doing right now: For BIG DATA, only move to
-    # GPU in get_batch(...).
-    if args.cuda:
-        data = data.cuda()
+    # For BIG DATA, only move to GPU in get_batch(...).
+    # if args.cuda:
+    #     data = data.cuda()
+
     return data
 
 
@@ -67,11 +67,10 @@ def get_batch(source, i, args, seq_len=None, evaluation=False):
     data = Variable(source[i:i+seq_len], volatile=evaluation)
     target = Variable(source[i+1:i+1+seq_len].view(-1))
 
-    # NOTE(mbforbes): Idea, but not doing right now: Move to GPU here (instead
-    # of in batchify).
-    # if args.cuda:
-    #     data = data.cuda()
-    #     target = target.cuda()
+    # NOTE(mbforbes): Move to GPU here (instead of in batchify).
+    if args.cuda:
+        data = data.cuda()
+        target = target.cuda()
 
     return data, target
 
