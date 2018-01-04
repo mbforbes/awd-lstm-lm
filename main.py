@@ -79,11 +79,13 @@ def get_args():
                         help='report interval')
     parser.add_argument('--name', type=str, default='untitled-experiment',
                         help='name of the experiment (used in model checkpoints)')
-    parser.add_argument('--save-interval', type=int, default=1000,
+    parser.add_argument('--save-interval', type=int, default=40000,
                         help='interval to checkpoint model to models/')
     randomhash = ''.join(str(time.time()).split('.'))
     parser.add_argument('--save', type=str,  default=randomhash+'.pt',
                         help='path to save the final model')
+    parser.add_argument('--load-model', type=str,
+                        help='if provided, load the model at this path')
     parser.add_argument('--alpha', type=float, default=2,
                         help='alpha L2 regularization on RNN activation (alpha = 0 means no regularization)')
     parser.add_argument('--beta', type=float, default=1,
@@ -211,20 +213,42 @@ def load_data_old(args, eval_batch_size: int, test_batch_size: int) -> Tuple[int
 # Build the model
 ###############################################################################
 
+def load_model(args):
+    """
+    Returns model and loss function.
+    """
+    print('INFO: Loading model from "{}"'.format(args.load_model))
+    print('INFO: NOTE: All model params (e.g., RNN type, vocab size, emsize, ')
+    print('INFO: nhid, nlayers, dropout\{,h,i,e\}, wdrop, tied) passed in as')
+    print('INFO: args will be ignored, as using model saved at path.')
+    with open(args.load_model, 'rb') as f:
+        model = torch.load(f)
+
+    if args.cuda:
+        print('INFO: Moving model to GPU')
+        model.cuda()
+
+    total_params = sum(x.size()[0] * x.size()[1] if len(x.size()) > 1 else x.size()[0] for x in model.parameters())
+    print('INFO: Model total parameters:', total_params)
+
+    criterion = nn.CrossEntropyLoss()
+
+    return model, criterion
+
+
 def build_model(args, ntokens: int):
     """
     Returns model and loss function.
     """
-    print('Building model')
+    print('INFO: Building model')
     model = RNNModel(
         args.model, ntokens, args.emsize, args.nhid, args.nlayers, args.dropout,
         args.dropouth, args.dropouti, args.dropoute, args.wdrop, args.tied)
     if args.cuda:
-        print('Moving model to GPU')
+        print('INFO: Moving model to GPU')
         model.cuda()
     total_params = sum(x.size()[0] * x.size()[1] if len(x.size()) > 1 else x.size()[0] for x in model.parameters())
-    print('Args:', args)
-    print('Model total parameters:', total_params)
+    print('INFO: Model total parameters:', total_params)
 
     criterion = nn.CrossEntropyLoss()
 
@@ -434,12 +458,22 @@ def main():
     # main
     args = get_args()
     set_seed(args.seed, args.cuda)
+    print('Args:', args)
 
+    # load data
     ntokens, train_data, val_data, test_data = load_data(
         args, eval_batch_size, test_batch_size)
 
-    model, criterion = build_model(args, ntokens)
+    # construct model
+    if args.load_model is not None:
+        model, criterion = load_model(args)
+    else:
+        model, criterion = build_model(args, ntokens)
+
+    # train / val
     train_loop(args, model, criterion, ntokens, train_data, val_data, eval_batch_size)
+
+    # test (maybe)
     test(args, criterion, ntokens, test_data, test_batch_size)
 
 
