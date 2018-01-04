@@ -77,6 +77,10 @@ def get_args():
                         help='use CUDA')
     parser.add_argument('--log-interval', type=int, default=200, metavar='N',
                         help='report interval')
+    parser.add_argument('--name', type=str, default='untitled-experiment',
+                        help='name of the experiment (used in model checkpoints)')
+    parser.add_argument('--save-interval', type=int, default=1000,
+                        help='interval to checkpoint model to models/')
     randomhash = ''.join(str(time.time()).split('.'))
     parser.add_argument('--save', type=str,  default=randomhash+'.pt',
                         help='path to save the final model')
@@ -120,6 +124,28 @@ def set_seed(seed: int, use_cuda: bool) -> None:
             torch.cuda.manual_seed(seed)
 
 
+def checkpoint(
+        args, model, criterion, ntokens: int, val_data: LongTensor,
+        eval_batch_size: int, name: str, epoch: int, batch: int) -> None:
+    """Runs on val and saves model checkpoint.
+    """
+    # this turns model to eval mode
+    valid_loss, valid_duration = evaluate(
+        args, model, criterion, ntokens, val_data, eval_batch_size)
+    valid_ppl = math.exp(valid_loss)
+
+    path = 'models/main-{}-e_{}-b_{}-vppl_{:.2f}.pt'.format(
+        name, epoch, batch, valid_ppl)
+    print('INFO: Checkpoint: Writing model to "{}"'.format(path))
+    with open(path, 'wb') as f:
+        torch.save(model, f)
+
+    # i think we need to turn the model back to train mode before we return
+    if args.model == 'QRNN':
+        model.reset()
+    model.train()
+
+
 ###############################################################################
 # Load data
 ###############################################################################
@@ -149,6 +175,7 @@ def load_data(args, eval_batch_size: int, test_batch_size: int) -> Tuple[int, Lo
         test_data = batchify(torch.load(args.in_test_path), test_batch_size, args)
 
     return len(v), train_data, val_data, test_data
+
 
 def load_data_old(args, eval_batch_size: int, test_batch_size: int) -> Tuple[int, LongTensor, LongTensor, Optional[LongTensor]]:
     """
@@ -208,8 +235,14 @@ def build_model(args, ntokens: int):
 # Training code
 ###############################################################################
 
-def evaluate(args, model, criterion, ntokens: int, data_source, batch_size=10):
+def evaluate(
+        args, model, criterion, ntokens: int, data_source,
+        batch_size=10) -> Tuple[float, float]:
+    """
+    Returns 2-tuple of (loss, time elapsed in seconds)
+    """
     # Turn on evaluation mode which disables dropout.
+    eval_start = time.time()
     model.eval()
     if args.model == 'QRNN': model.reset()
     total_loss = 0
@@ -220,10 +253,12 @@ def evaluate(args, model, criterion, ntokens: int, data_source, batch_size=10):
         output_flat = output.view(-1, ntokens)
         total_loss += len(data) * criterion(output_flat, targets).data
         hidden = repackage_hidden(hidden)
-    return total_loss[0] / len(data_source)
+    return (total_loss[0] / len(data_source), time.time() - eval_start)
 
 
-def train(args, model, criterion, optimizer, ntokens: int, train_data, epoch):
+def train(
+        args, model, criterion, optimizer, ntokens: int, train_data,
+        epoch: int, val_data: LongTensor, eval_batch_size: int) -> None:
     # Turn on training mode which enables dropout.
     if args.model == 'QRNN': model.reset()
     total_loss = 0
@@ -289,6 +324,16 @@ def train(args, model, criterion, optimizer, ntokens: int, train_data, epoch):
                 elapsed * 1000 / args.log_interval, cur_loss, math.exp(cur_loss)))
             total_loss = 0
             start_time = time.time()
+
+        # maybe checkpoint model. have to set to eval mode, then set back to
+        # training mode. also, reset the start_time timer, which the above code
+        # assumes is always running.
+        if batch % args.save_interval == 0:
+            checkpoint(
+                args, model, criterion, ntokens, val_data, eval_batch_size,
+                args.name, epoch, batch)
+            start_time = time.time()
+
         ###
         batch += 1
         i += seq_len
@@ -307,69 +352,74 @@ def train_loop(
         optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, weight_decay=args.wdecay)
         for epoch in range(1, args.epochs+1):
             epoch_start_time = time.time()
-            train(args, model, criterion, optimizer, ntokens, train_data, epoch)
+            train(args, model, criterion, optimizer, ntokens, train_data, epoch, val_data, eval_batch_size)
             if 't0' in optimizer.param_groups[0]:
                 tmp = {}
                 for prm in model.parameters():
                     tmp[prm] = prm.data.clone()
                     prm.data = optimizer.state[prm]['ax'].clone()
 
-                val_loss2 = evaluate(args, model, criterion, ntokens, val_data)
+                val_loss2, val_duration = evaluate(args, model, criterion, ntokens, val_data)
+
                 print('-' * 89)
                 print('| end of epoch {:3d} | time: {:5.2f}s | valid loss {:5.2f} | '
                         'valid ppl {:8.2f}'.format(epoch, (time.time() - epoch_start_time),
                                                 val_loss2, math.exp(val_loss2)))
                 print('-' * 89)
 
+                print('INFO: Validation took {:.2f} seconds'.format(val_duration))
                 if val_loss2 < stored_loss:
                     with open(args.save, 'wb') as f:
                         torch.save(model, f)
-                    print('Saving Averaged!')
+                    print('INFO: Saving Averaged!')
                     stored_loss = val_loss2
 
                 for prm in model.parameters():
                     prm.data = tmp[prm].clone()
 
             else:
-                val_loss = evaluate(args, model, criterion, ntokens, val_data, eval_batch_size)
+                val_loss, val_duration = evaluate(args, model, criterion, ntokens, val_data, eval_batch_size)
+
                 print('-' * 89)
                 print('| end of epoch {:3d} | time: {:5.2f}s | valid loss {:5.2f} | '
                         'valid ppl {:8.2f}'.format(epoch, (time.time() - epoch_start_time),
                                                 val_loss, math.exp(val_loss)))
                 print('-' * 89)
 
+                print('INFO: Validation took {:.2f} seconds'.format(val_duration))
                 if val_loss < stored_loss:
-                    print('Writing new best model to {}'.format(args.save))
+                    print('INFO: Writing new best model to {}'.format(args.save))
                     with open(args.save, 'wb') as f:
                         torch.save(model, f)
-                    print('Saving Normal!')
+                    print('INFO: Saving Normal!')
                     stored_loss = val_loss
 
                 if 't0' not in optimizer.param_groups[0] and (len(best_val_loss)>args.nonmono and val_loss > min(best_val_loss[:-args.nonmono])):
-                    print('Switching!')
+                    print('INFO: Switching!')
                     optimizer = torch.optim.ASGD(model.parameters(), lr=args.lr, t0=0, lambd=0., weight_decay=args.wdecay)
                     #optimizer.param_groups[0]['lr'] /= 2.
                 best_val_loss.append(val_loss)
 
     except KeyboardInterrupt:
         print('-' * 89)
-        print('Exiting from training early')
+        print('INFO: Exiting from training early')
 
 
 def test(args, criterion, ntokens: int, test_data: Optional[LongTensor], test_batch_size: int):
     if not args.test:
-        print('Skipping test because --test not provided...')
+        print('INFO: Skipping test because --test not provided...')
         return
 
-    print('Evaluating on test set.')
+    print('INFO: Evaluating on test set.')
 
     # Load the best saved model.
-    print('Loading best model from {}'.format(args.save))
+    print('INFO: Loading best model from {}'.format(args.save))
     with open(args.save, 'rb') as f:
         model = torch.load(f)
 
     # Run on test data.
-    test_loss = evaluate(args, model, criterion, ntokens, test_data, test_batch_size)
+    test_loss, test_duration = evaluate(args, model, criterion, ntokens, test_data, test_batch_size)
+    print('INFO: Testing took {:.2f} seconds'.format(test_duration))
     print('=' * 89)
     print('| End of training | test loss {:5.2f} | test ppl {:8.2f}'.format(
         test_loss, math.exp(test_loss)))
