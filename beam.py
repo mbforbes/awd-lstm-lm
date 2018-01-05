@@ -32,6 +32,8 @@ def beamsearch(
         model, output, hidden, eos: int, beam_size: int = 5,
         maxlen: int = 500) -> torch.LongTensor:
     """
+    Model is a VanillaLM or CacheLM.
+
     Each entry in the beam is a 3-tuple of (
         [words]: List[int] (sequence of tokens),
         hidden: any (after running all EXCEPT last word through model),
@@ -70,7 +72,7 @@ def beamsearch(
             # NOTE: pointer would modify output here.
             # run the last beam word through model
             inp.data.fill_(words[-1])
-            output, next_hidden = model(inp, hidden)
+            output, next_hidden = model.predict(inp, hidden)
             lsm_output = F.log_softmax(output.squeeze()).data
 
             # grow next beam candidates
