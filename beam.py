@@ -56,11 +56,8 @@ def beamsearch(
     if len(beam) > beam_size:
         beam = beam[:-1]
 
-    # init the best eos entry
+    # init the best eos entry (to invalid)
     # ---
-    # option 1: give it eos to start
-    # best_eos = ([eos], lsm_output[eos])
-    # option 2: invalid to start
     best_eos = ([-1], float('-inf'))
 
     # beam search
@@ -76,19 +73,11 @@ def beamsearch(
             output, next_hidden = model(inp, hidden)
             lsm_output = F.log_softmax(output.squeeze()).data
 
-            # variant: always consider EOS ending (currently disabled)
-            # eos_prob = prob_sum + lsm_output[eos]
-            # if eos_prob > best_eos[1]:
-            #     best_eos = (words + [eos], eos_prob)
-
             # grow next beam candidates
             # NOTE: using N+1 to account for getting EOS tokens
             values, indices = lsm_output.topk(beam_size + 1)
             for i in range(len(values)):
                 if indices[i] == eos:
-                    # variant: checking eos here (rather than always above).
-                    # if checking above, this branch becomes just `continue`
-                    # and no `else` is needed.
                     eos_prob = prob_sum + values[i]
                     if eos_prob > best_eos[1]:
                         best_eos = (words + [eos], eos_prob)
