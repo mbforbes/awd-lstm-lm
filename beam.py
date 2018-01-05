@@ -69,7 +69,6 @@ def beamsearch(
     while (not finished) and len(beam[0]) < maxlen:
         next_beam = []
         for (words, hidden, prob_sum) in beam:
-            # NOTE: pointer would modify output here.
             # run the last beam word through model
             inp.data.fill_(words[-1])
             output, next_hidden = model.predict(inp, hidden)

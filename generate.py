@@ -98,7 +98,7 @@ def main():
 
     # actual generation
     generations = []
-    for i, initial in enumerate(initials):
+    for i, initial in enumerate(tqdm(initials)):
         # print('INFO: Initial {}/{}: {}'.format(
         #     i+1, len(initials), tensor2str(vocab, initial)))
         # create hidden state, which will just be zero'd out. batch size = 1.
@@ -117,7 +117,7 @@ def main():
             model, output, hidden, eos, args.beam_size, args.max_len)
         gen_str = tensor2str(vocab, gen_tensor)
         generations.append(gen_str)
-        print('INFO: Generation: {}'.format(gen_str))
+        # print('INFO: Generation: {}'.format(gen_str))
 
     # write to file.
     print('INFO: Writing to "{}"'.format(args.output_path))
