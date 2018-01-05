@@ -58,7 +58,10 @@ def beamsearch(
 
     # init the best eos entry
     # ---
-    best_eos = ([eos], lsm_output[eos])
+    # option 1: give it eos to start
+    # best_eos = ([eos], lsm_output[eos])
+    # option 2: invalid to start
+    best_eos = ([-1], float('-inf'))
 
     # beam search
     # ---

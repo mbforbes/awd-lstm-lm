@@ -79,8 +79,8 @@ def main():
     # actual generation
     generations = []
     for i, initial in enumerate(initials):
-        print('INFO: Initial {}/{}: {}'.format(
-            i+1, len(initials), tensor2str(vocab, initial)))
+        # print('INFO: Initial {}/{}: {}'.format(
+        #     i+1, len(initials), tensor2str(vocab, initial)))
         # create hidden state, which will just be zero'd out. batch size = 1.
         hidden = model.init_hidden(1)
 
