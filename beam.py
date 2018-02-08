@@ -60,15 +60,22 @@ def beam_complete_nsents(n: int, eos: int, eog: Set[int]) -> BeamCompleteFn:
 def beamsearch(
         model, output, hidden, special_tkns: Set[int],
         beam_complete: BeamCompleteFn, beam_size: int = 5,
-        maxlen: int = 500, eog: Optional[int] = None ) -> torch.LongTensor:
+        maxlen: int = 500, eog: Optional[int] = None,
+        unk: Optional[int] = None) -> torch.LongTensor:
     """
     Model is a VanillaLM or CacheLM.
 
     Args:
-        special_tkns: these are tokens (like EOS) that are vital to the
-            functioning of beam search, but don't count as normal words. This
+        special_tkns: these are tokens (like EOS, EOG, UNK) that may or may not
+            appear in the beam, but don't always count as normal words. This
             means that when we grab candidates, we grab this many more than our
             beam size to account for getting them.
+
+        eog: if an int is provided, will disallow this token from appearing at
+            a non-final location in a set of words. if None, ignored.
+
+        unk: if an int is provided, will disallow this token from appearing
+            anywhere in a set of words. if None, ignored.
 
     Each entry in the beam is a 3-tuple of (
         [words]: List[int] (sequence of tokens),
@@ -104,7 +111,6 @@ def beamsearch(
     # ---
     inp = Variable(torch.cuda.LongTensor(1,1), volatile=True)
     finished = False
-    beam_addition = 1 if eog is not None else 0
     while (not finished) and len(beam[0].tokens) < maxlen:
         next_beam: List[BeamEntry] = []
         for (words, hidden, prob_sum) in beam:
@@ -114,17 +120,19 @@ def beamsearch(
             lsm_output = F.log_softmax(output.squeeze()).data
 
             # grow next beam candidates
-            # NOTE: could use N+len(special_tkns) to account for getting
-            # special tokens, but this may also cause us to reach them.
-            values, indices = lsm_output.topk(beam_size + beam_addition)
+            values, indices = lsm_output.topk(beam_size + len(special_tkns))
             for i in range(len(values)):
+                # maybe prevent unks
+                if unk is not None and indices[i] == unk:
+                    continue
+                # candidate computations
                 new_logprob = prob_sum + values[i]
                 new_words = words + [indices[i]]
                 if beam_complete(new_words):
                     if new_logprob > best_complete.logprob:
                         best_complete = BestComplete(new_words, new_logprob)
+                # maybe prevent eog token for incomplete beam
                 elif eog is not None and indices[i] == eog:
-                    # can't add eog token if beam isn't complete; throw away
                     continue
                 else:
                     next_beam.append(BeamEntry(new_words, next_hidden, new_logprob))
