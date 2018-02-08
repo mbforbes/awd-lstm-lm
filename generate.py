@@ -38,6 +38,8 @@ def get_args():
     parser.add_argument('output_path', type=str, help='path to file to write output generations')
     parser.add_argument('--model', type=str, help='options: [vanilla,cache], default: cache', default='vanilla')
     parser.add_argument('--beam-size', type=int, default=5, help='beam size, default: 5')
+    parser.add_argument('--sents', type=int, default=5, help='number of sentences to generate, default: 5')
+    parser.add_argument('--use-eog', type=bool, default=False, help='whether to add <end> as possible end of generation token, default: False')
     parser.add_argument('--max-len', type=int, default=500, help='maximum generation length, default: 500')
     parser.add_argument('--theta', type=float, default=0.6625523432485668, help='theta controls cache flatness')
     parser.add_argument('--lmb', type=float, default=0.12785920428335693, help='lmb (lambda) controls mixture between cache (1.0) and LM `model` (0.0)')
@@ -81,7 +83,11 @@ def main():
     # generation.
     unk = vocab.word2idx[data.UNK]
     eos = vocab.word2idx['</s>']
-    beam_complete = beam.beam_complete_simple(eos)
+    eog = {eos}
+    if args.use_eog:
+        eog.add(vocab.word2idx['<end>'])
+    # beam_complete = beam.beam_complete_simple(eos)
+    beam_complete = beam.beam_complete_nsents(args.sents, eos, eog)
 
     # load initials (as word idxes)
     print('INFO: Loading initials from "{}"'.format(args.initial_path))
@@ -119,7 +125,7 @@ def main():
 
             # now, we can run w/ beam search.
             gen_tensor = beam.beamsearch(
-                model, output, hidden, {eos}, beam_complete, args.beam_size,
+                model, output, hidden, eog, beam_complete, args.beam_size,
                 args.max_len)
             gen_str = tensor2str(vocab, gen_tensor)
 

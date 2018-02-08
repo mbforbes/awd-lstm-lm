@@ -36,6 +36,18 @@ def beam_complete_simple(eos: int) -> BeamCompleteFn:
     return ends_in_eos
 
 
+def beam_complete_nsents(n: int, eos: int, eog: Set[int]) -> BeamCompleteFn:
+    """
+    Returns a function that checks whether a beam (words only) contains `n`
+    `eos` tokens before its final token, and then ends in one of the tokens in
+    `eog`.
+    """
+    def nsents_then_eog(all_words: List[int]) -> bool:
+        n_eos = len([tkn for tkn in all_words[:-1] if tkn == eos])
+        return n_eos == n - 1 and all_words[-1] in eog
+    return nsents_then_eog
+
+
 def beamsearch(
         model, output, hidden, special_tkns: Set[int],
         beam_complete: BeamCompleteFn, beam_size: int = 5,
