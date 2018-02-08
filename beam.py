@@ -6,7 +6,7 @@ author: mbforbes
 
 # builtins
 import code
-from typing import Union, Tuple
+from typing import Union, Tuple, List, Callable, Set
 
 # third party
 import torch
@@ -19,7 +19,7 @@ import data
 
 LongTensor = Union[torch.LongTensor, torch.cuda.LongTensor]
 FloatTensor = Union[torch.FloatTensor, torch.cuda.FloatTensor]
-
+BeamCompleteFn = Callable[[List[int]], bool]
 
 # TODO: stochastic sampling (alternative to 'topk'). This algorithm looks like:
 # - input: P: log probability distribution over words
@@ -27,12 +27,27 @@ FloatTensor = Union[torch.FloatTensor, torch.cuda.FloatTensor]
 # - NOTE: unsure of can use torch.multinomial because indices not returned...
 # - return values, indices of multinomial sample N options from P
 
+def beam_complete_simple(eos: int) -> BeamCompleteFn:
+    """
+    Returns a function that checks whether a beam (words only) ends in an EOS.
+    """
+    def ends_in_eos(all_words: List[int]) -> bool:
+        return all_words[-1] == eos
+    return ends_in_eos
+
 
 def beamsearch(
-        model, output, hidden, eos: int, beam_size: int = 5,
+        model, output, hidden, special_tkns: Set[int],
+        beam_complete: BeamCompleteFn, beam_size: int = 5,
         maxlen: int = 500) -> torch.LongTensor:
     """
     Model is a VanillaLM or CacheLM.
+
+    Args:
+        special_tkns: these are tokens (like EOS) that are vital to the
+            functioning of beam search, but don't count as normal words. This
+            means that when we grab candidates, we grab this many more than our
+            beam size to account for getting them.
 
     Each entry in the beam is a 3-tuple of (
         [words]: List[int] (sequence of tokens),
@@ -44,23 +59,23 @@ def beamsearch(
     # ---
     lsm_output = F.log_softmax(output.squeeze()).data
 
-    # grab beam_size + 1 because we may grab EOS
-    values, indices = lsm_output.topk(beam_size + 1)
+    # grab beam_size + 1 because we may grab special tokens
+    values, indices = lsm_output.topk(beam_size + len(special_tkns))
     beam = []
 
     for i in range(len(values)):
-        # don't add EOS
-        if indices[i] == eos:
+        # don't add any special tokens
+        if indices[i] in special_tkns:
             continue
         beam.append(([indices[i]], hidden, values[i]))
 
-    # if no EOS was added, need to prune down one
+    # if no special tokens were added, need to prune back down to beam size
     if len(beam) > beam_size:
-        beam = beam[:-1]
+        beam = beam[:beam_size]
 
-    # init the best eos entry (to invalid)
+    # init the best complete entry (to invalid)
     # ---
-    best_eos = ([-1], float('-inf'))
+    best_complete = ([-1], float('-inf'))
 
     # beam search
     # ---
@@ -75,24 +90,26 @@ def beamsearch(
             lsm_output = F.log_softmax(output.squeeze()).data
 
             # grow next beam candidates
-            # NOTE: using N+1 to account for getting EOS tokens
-            values, indices = lsm_output.topk(beam_size + 1)
+            # NOTE: could use N+len(special_tkns) to account for getting
+            # special tokens, but this may also cause us to reach them.
+            values, indices = lsm_output.topk(beam_size )
             for i in range(len(values)):
-                if indices[i] == eos:
-                    eos_prob = prob_sum + values[i]
-                    if eos_prob > best_eos[1]:
-                        best_eos = (words + [eos], eos_prob)
+                new_prob = prob_sum + values[i]
+                new_words = words + [indices[i]]
+                if beam_complete(new_words):
+                    if new_prob > best_complete[1]:
+                        best_complete = (new_words, new_prob)
                 else:
-                    next_beam.append((words + [indices[i]], next_hidden, prob_sum + values[i]))
+                    next_beam.append((new_words, next_hidden, new_prob))
 
         # prune to make next beam.
         beam = sorted(next_beam, key=lambda entry: entry[2], reverse=True)[:beam_size]
 
         # check finishing condition. (beam sorted right now so first has
         # highest score.)
-        finished = best_eos[1] > beam[0][2]
+        finished = best_complete[1] > beam[0][2]
 
-    # If we've got a best_eos that's better than the whole beam we return it.
-    # If instead we hit the max length, we still return the best EOS entry,
-    # because we want it to end.
-    return torch.LongTensor(best_eos[0])
+    # If we've got a best_complete that's better than the whole beam we return
+    # it. If instead we hit the max length, we still return the best complete
+    # entry, because we want it to end.
+    return torch.LongTensor(best_complete[0])
