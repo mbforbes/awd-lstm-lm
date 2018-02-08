@@ -6,7 +6,7 @@ author: mbforbes
 
 # builtins
 import code
-from typing import Union, Tuple, List, Callable, Set, Optional
+from typing import Union, Tuple, List, Callable, Set, Optional, Any, NamedTuple
 
 # third party
 import torch
@@ -20,6 +20,15 @@ import data
 LongTensor = Union[torch.LongTensor, torch.cuda.LongTensor]
 FloatTensor = Union[torch.FloatTensor, torch.cuda.FloatTensor]
 BeamCompleteFn = Callable[[List[int]], bool]
+
+class BeamEntry(NamedTuple):
+    tokens: List[int]
+    hidden: Any
+    logprob: float
+
+class BestComplete(NamedTuple):
+    tokens: List[int]
+    logprob: float
 
 # TODO: stochastic sampling (alternative to 'topk'). This algorithm looks like:
 # - input: P: log probability distribution over words
@@ -72,14 +81,16 @@ def beamsearch(
     lsm_output = F.log_softmax(output.squeeze()).data
 
     # grab beam_size + 1 because we may grab special tokens
+    values: List[float]
+    indices: List[int]
     values, indices = lsm_output.topk(beam_size + len(special_tkns))
-    beam = []
+    beam: List[BeamEntry] = []
 
     for i in range(len(values)):
         # don't add any special tokens
         if indices[i] in special_tkns:
             continue
-        beam.append(([indices[i]], hidden, values[i]))
+        beam.append(BeamEntry([indices[i]], hidden, values[i]))
 
     # if no special tokens were added, need to prune back down to beam size
     if len(beam) > beam_size:
@@ -87,15 +98,15 @@ def beamsearch(
 
     # init the best complete entry (to invalid)
     # ---
-    best_complete = ([-1], float('-inf'))
+    best_complete = BestComplete([-1], float('-inf'))
 
     # beam search
     # ---
     inp = Variable(torch.cuda.LongTensor(1,1), volatile=True)
     finished = False
     beam_addition = 1 if eog is not None else 0
-    while (not finished) and len(beam[0]) < maxlen:
-        next_beam = []
+    while (not finished) and len(beam[0].tokens) < maxlen:
+        next_beam: List[BeamEntry] = []
         for (words, hidden, prob_sum) in beam:
             # run the last beam word through model
             inp.data.fill_(words[-1])
@@ -107,25 +118,25 @@ def beamsearch(
             # special tokens, but this may also cause us to reach them.
             values, indices = lsm_output.topk(beam_size + beam_addition)
             for i in range(len(values)):
-                new_prob = prob_sum + values[i]
+                new_logprob = prob_sum + values[i]
                 new_words = words + [indices[i]]
                 if beam_complete(new_words):
-                    if new_prob > best_complete[1]:
-                        best_complete = (new_words, new_prob)
+                    if new_logprob > best_complete.logprob:
+                        best_complete = BestComplete(new_words, new_logprob)
                 elif eog is not None and indices[i] == eog:
                     # can't add eog token if beam isn't complete; throw away
                     continue
                 else:
-                    next_beam.append((new_words, next_hidden, new_prob))
+                    next_beam.append(BeamEntry(new_words, next_hidden, new_logprob))
 
-        # prune to make next beam.
-        beam = sorted(next_beam, key=lambda entry: entry[2], reverse=True)[:beam_size]
+        # prune to top beam_size entries by logprob to make next beam.
+        beam = sorted(next_beam, key=lambda entry: entry.logprob, reverse=True)[:beam_size]
 
         # check finishing condition. (beam sorted right now so first has
         # highest score.)
-        finished = best_complete[1] > beam[0][2]
+        finished = best_complete.logprob > beam[0].logprob
 
     # If we've got a best_complete that's better than the whole beam we return
     # it. If instead we hit the max length, we still return the best complete
     # entry, because we want it to end.
-    return torch.LongTensor(best_complete[0])
+    return torch.LongTensor(best_complete.tokens)
