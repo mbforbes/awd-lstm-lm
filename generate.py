@@ -83,11 +83,13 @@ def main():
     # generation.
     unk = vocab.word2idx[data.UNK]
     eos = vocab.word2idx['</s>']
-    eog = {eos}
+    eog_set = {eos}
+    eog_tkn = None
     if args.use_eog:
-        eog.add(vocab.word2idx['<end>'])
+        eog_tkn = vocab.word2idx['<end>']
+        eog_set.add(eog_tkn)
     # beam_complete = beam.beam_complete_simple(eos)
-    beam_complete = beam.beam_complete_nsents(args.sents, eos, eog)
+    beam_complete = beam.beam_complete_nsents(args.sents, eos, eog_set)
 
     # load initials (as word idxes)
     print('INFO: Loading initials from "{}"'.format(args.initial_path))
@@ -125,8 +127,8 @@ def main():
 
             # now, we can run w/ beam search.
             gen_tensor = beam.beamsearch(
-                model, output, hidden, eog, beam_complete, args.beam_size,
-                args.max_len)
+                model, output, hidden, eog_set, beam_complete, args.beam_size,
+                args.max_len, eog_tkn)
             gen_str = tensor2str(vocab, gen_tensor)
 
             # print('INFO: Generation: {}'.format(gen_str))

@@ -6,7 +6,7 @@ author: mbforbes
 
 # builtins
 import code
-from typing import Union, Tuple, List, Callable, Set
+from typing import Union, Tuple, List, Callable, Set, Optional
 
 # third party
 import torch
@@ -51,7 +51,7 @@ def beam_complete_nsents(n: int, eos: int, eog: Set[int]) -> BeamCompleteFn:
 def beamsearch(
         model, output, hidden, special_tkns: Set[int],
         beam_complete: BeamCompleteFn, beam_size: int = 5,
-        maxlen: int = 500) -> torch.LongTensor:
+        maxlen: int = 500, eog: Optional[int] = None ) -> torch.LongTensor:
     """
     Model is a VanillaLM or CacheLM.
 
@@ -93,6 +93,7 @@ def beamsearch(
     # ---
     inp = Variable(torch.cuda.LongTensor(1,1), volatile=True)
     finished = False
+    beam_addition = 1 if eog is not None else 0
     while (not finished) and len(beam[0]) < maxlen:
         next_beam = []
         for (words, hidden, prob_sum) in beam:
@@ -104,13 +105,16 @@ def beamsearch(
             # grow next beam candidates
             # NOTE: could use N+len(special_tkns) to account for getting
             # special tokens, but this may also cause us to reach them.
-            values, indices = lsm_output.topk(beam_size )
+            values, indices = lsm_output.topk(beam_size + beam_addition)
             for i in range(len(values)):
                 new_prob = prob_sum + values[i]
                 new_words = words + [indices[i]]
                 if beam_complete(new_words):
                     if new_prob > best_complete[1]:
                         best_complete = (new_words, new_prob)
+                elif eog is not None and indices[i] == eog:
+                    # can't add eog token if beam isn't complete; throw away
+                    continue
                 else:
                     next_beam.append((new_words, next_hidden, new_prob))
 
