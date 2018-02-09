@@ -36,7 +36,7 @@ def get_args():
     parser.add_argument('vocab_path', type=str, help='path to vocab (that the model used)')
     parser.add_argument('initial_path', type=str, help='path to file containing initials')
     parser.add_argument('output_path', type=str, help='path to file to write output generations')
-    parser.add_argument('--model', type=str, help='options: [vanilla,cache], default: cache', default='vanilla')
+    parser.add_argument('--model', type=str, help='options: [vanilla,cache], default: cache', default='cache')
     parser.add_argument('--beam-size', type=int, default=5, help='beam size, default: 5')
     parser.add_argument('--sents', type=int, default=5, help='number of sentences to generate, default: 5')
     parser.add_argument('--use-eog', action='store_true', help='whether to add <end> as possible end of generation token (disabled by default)')
